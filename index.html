@@ -555,10 +555,12 @@
                         
                         const originalPos = dumpTruck.position.clone();
                         dumpTruck.position.add(moveVec);
-                        dumpTruck.updateMatrixWorld(true);
                         
-                        const truckBox = new THREE.Box3().setFromObject(dumpTruck);
-                        truckBox.expandByScalar(-0.4); // 덜 빡빡하게 틈을 줌
+                        // 회전할 때마다 바운딩 박스가 커지는 현상(끼임 버그)을 막기 위해 고정된 크기 사용
+                        const truckBox = new THREE.Box3().setFromCenterAndSize(
+                            dumpTruck.position, 
+                            new THREE.Vector3(2.5, 3.0, 2.5) // 고정된 충돌 크기
+                        );
 
                         let collision = false;
                         for (let obj of collidables) {
