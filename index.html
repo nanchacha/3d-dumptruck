@@ -93,6 +93,7 @@
         let ground;
         let dumpTruck;
         let interactables = []; // 클릭 가능한 객체들 (바닥 + 흙더미)
+        let collidables = []; // 트럭과 물리적으로 충돌하는 장애물들
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         let targetMarker;
@@ -230,6 +231,7 @@
                 
                 group.add(mesh);
                 interactables.push(mesh); // 광선 충돌(Raycast) 배열에 추가
+                collidables.push(mesh); // 물리 충돌 배열에 추가
             }
             scene.add(group);
             activePiles.push(group); // 생성된 흙 더미를 관리 배열에 추가
@@ -306,6 +308,11 @@
             }
 
             scene.add(siteGroup);
+            
+            // 공사장 배경의 모든 구조물을 충돌 가능한 객체로 등록
+            siteGroup.traverse((child) => {
+                if (child.isMesh) collidables.push(child);
+            });
         }
 
         // 모서리가 둥근 큐브 생성 헬퍼
@@ -542,10 +549,37 @@
                         dumpTruck.rotation.y += diff * 6 * delta;
 
                         const speed = 10 * delta;
-                        dir.normalize().multiplyScalar(speed);
-                        dumpTruck.position.add(dir);
+                        const moveVec = dir.clone().normalize().multiplyScalar(speed);
+                        
+                        const originalPos = dumpTruck.position.clone();
+                        dumpTruck.position.add(moveVec);
+                        dumpTruck.updateMatrixWorld(true);
+                        
+                        const truckBox = new THREE.Box3().setFromObject(dumpTruck);
+                        truckBox.expandByScalar(-0.4); // 덜 빡빡하게 틈을 줌
 
-                        ud.wheels.forEach(wheel => { wheel.rotation.x += speed * 2; });
+                        let collision = false;
+                        for (let obj of collidables) {
+                            if (!obj.parent || !obj.visible) continue; 
+                            
+                            // 목적지인 흙더미는 통과 가능해야 흙을 실을 수 있음
+                            if (ud.targetAction === 'load' && ud.targetPile && obj.userData.parentGroup === ud.targetPile) continue;
+                            
+                            const objBox = new THREE.Box3().setFromObject(obj);
+                            if (truckBox.intersectsBox(objBox)) {
+                                collision = true;
+                                break;
+                            }
+                        }
+
+                        if (collision) {
+                            // 충돌 시 이동 취소하고 멈춤
+                            dumpTruck.position.copy(originalPos);
+                            ud.state = 'idle';
+                            targetMarker.visible = false;
+                        } else {
+                            ud.wheels.forEach(wheel => { wheel.rotation.x += speed * 2; });
+                        }
                     } else {
                         // 목표 지점 도착
                         targetMarker.visible = false;
