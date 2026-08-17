@@ -23,17 +23,18 @@
         }
 
         .instruction {
-            display: block;
-            margin: 0 auto 15px auto;
+            position: absolute;
+            top: 20px;
+            left: 20px;
             background: rgba(255, 255, 255, 0.9);
-            padding: 10px 25px;
-            border-radius: 30px;
-            font-size: 16px;
+            padding: 8px 15px;
+            border-radius: 15px;
+            font-size: 13px;
             font-weight: bold;
             color: #333;
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
             pointer-events: auto;
-            width: fit-content;
+            z-index: 20;
         }
 
         .action-btn {
@@ -83,8 +84,9 @@
 
     <div id="title">🚜 덤프트럭 흙 나르기</div>
     
+    <div class="instruction">💡 갈색 <b>흙 더미</b>를 터치해서 흙을 싣고,<br>원하는 곳으로 이동해 쏟아보세요!</div>
+
     <div id="ui-container">
-        <div class="instruction">갈색 <b>흙 더미</b>를 터치해서 흙을 싣고,<br>원하는 곳으로 이동해 쏟아보세요!</div>
         <button id="dump-btn" class="action-btn" disabled>짐칸 비었음</button>
     </div>
 
