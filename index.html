@@ -8,10 +8,7 @@
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #8B7355; /* 공사장 흙먼지 느낌의 배경색 */
-            background-image: url('https://images.unsplash.com/photo-1503387762-592deb58ef4e?q=80&w=2000&auto=format&fit=crop'); /* 공사장 배경 이미지 */
-            background-size: cover;
-            background-position: center;
+            background-color: #87CEEB;
             font-family: 'Malgun Gothic', sans-serif;
             touch-action: none;
         }
@@ -128,13 +125,10 @@
 
         function init() {
             scene = new THREE.Scene();
-            // 투명 배경 설정하여 CSS 배경 이미지가 보이도록 함
-            scene.background = null; 
-            // 흙먼지가 날리는 듯한 효과를 주기 위해 안개 색상을 모래색으로 변경
-            scene.fog = new THREE.Fog(0xDEB887, 30, 100);
+            scene.background = new THREE.Color(0x87CEEB); 
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
 
-            // 투명도(alpha: true) 활성화
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -184,6 +178,9 @@
 
             // 3. 트럭 생성
             buildSmoothDumpTruck();
+
+            // 3.5. 3D 공사장 배경(건물 뼈대 등) 추가
+            buildConstructionSite();
 
             // 4. 흙 더미 (Load Points) 여러 개 배치
             createDirtPile(-8, -8);
@@ -235,6 +232,79 @@
             }
             scene.add(group);
             activePiles.push(group); // 생성된 흙 더미를 관리 배열에 추가
+        }
+
+        function buildConstructionSite() {
+            const siteGroup = new THREE.Group();
+            
+            // 철골 및 콘크리트 재질
+            const steelMat = new THREE.MeshStandardMaterial({ color: 0x9c3e21, roughness: 0.6, metalness: 0.2 }); // 붉은 녹슨 철골 느낌
+            const concreteMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.9 });
+
+            // 1. 공사중인 건물 철골 뼈대 (뒤쪽 배경)
+            for(let i=0; i<4; i++) {
+                for(let j=0; j<2; j++) {
+                    // 세로 기둥
+                    const pillarGeo = new THREE.BoxGeometry(0.5, 20, 0.5);
+                    const pillar = new THREE.Mesh(pillarGeo, steelMat);
+                    pillar.position.set(-15 + i*8, 10, -25 + j*8);
+                    pillar.castShadow = true;
+                    pillar.receiveShadow = true;
+                    siteGroup.add(pillar);
+                    
+                    // X축 가로 빔
+                    if (i < 3) {
+                        for(let floor=1; floor<=4; floor++) {
+                            const beamGeoX = new THREE.BoxGeometry(8, 0.4, 0.4);
+                            const beamX = new THREE.Mesh(beamGeoX, steelMat);
+                            beamX.position.set(-11 + i*8, floor*4.5, -25 + j*8);
+                            beamX.castShadow = true;
+                            beamX.receiveShadow = true;
+                            siteGroup.add(beamX);
+                        }
+                    }
+                    
+                    // Z축 가로 빔
+                    if (j < 1) {
+                        for(let floor=1; floor<=4; floor++) {
+                            const beamGeoZ = new THREE.BoxGeometry(0.4, 0.4, 8);
+                            const beamZ = new THREE.Mesh(beamGeoZ, steelMat);
+                            beamZ.position.set(-15 + i*8, floor*4.5, -21 + j*8);
+                            beamZ.castShadow = true;
+                            beamZ.receiveShadow = true;
+                            siteGroup.add(beamZ);
+                        }
+                    }
+                }
+            }
+
+            // 2. 바닥에 놓인 대형 콘크리트 파이프
+            const pipeGeo = new THREE.CylinderGeometry(1.2, 1.2, 5, 16);
+            for(let k=0; k<3; k++) {
+                const pipe = new THREE.Mesh(pipeGeo, concreteMat);
+                pipe.rotation.z = Math.PI / 2;
+                pipe.rotation.y = (Math.random() - 0.5) * 0.5; // 약간씩 틀어지게
+                pipe.position.set(18, 1.2, -10 + k*3);
+                pipe.castShadow = true;
+                pipe.receiveShadow = true;
+                siteGroup.add(pipe);
+            }
+
+            // 3. 접근 금지용 안전 블록 (바리케이드)
+            for(let k=0; k<12; k++) {
+                const blockGeo = new THREE.BoxGeometry(1.5, 1, 0.8);
+                const color = k % 2 === 0 ? 0xFFC107 : 0x222222; // 노랑-검정 패턴
+                const blockMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.8 });
+                const block = new THREE.Mesh(blockGeo, blockMat);
+                // 약간 곡선 형태로 배치
+                block.position.set(-18 + k*1.6, 0.5, -8 + Math.sin(k*0.5)*2);
+                block.rotation.y = Math.cos(k*0.5)*0.2;
+                block.castShadow = true;
+                block.receiveShadow = true;
+                siteGroup.add(block);
+            }
+
+            scene.add(siteGroup);
         }
 
         // 모서리가 둥근 큐브 생성 헬퍼
