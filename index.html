@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D 덤프트럭 흙 나르기</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            font-family: 'Malgun Gothic', sans-serif;
+            touch-action: none;
+        }
+
+        #ui-container {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .instruction {
+            display: block;
+            margin: 0 auto 15px auto;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 25px;
+            border-radius: 30px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            pointer-events: auto;
+            width: fit-content;
+        }
+
+        .action-btn {
+            pointer-events: auto;
+            background-color: #FFD700;
+            border: 3px solid #DAA520;
+            border-radius: 15px;
+            padding: 12px 25px;
+            font-size: 20px;
+            font-weight: 900;
+            cursor: pointer;
+            box-shadow: 0 5px 0 #B8860B, 0 5px 10px rgba(0,0,0,0.3);
+            transition: all 0.1s;
+        }
+
+        .action-btn:active:not(:disabled) {
+            transform: translateY(5px);
+            box-shadow: 0 0 0 #B8860B, 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        .action-btn:disabled {
+            background-color: #cccccc;
+            border-color: #999999;
+            box-shadow: 0 5px 0 #888888;
+            color: #666666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #title {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 32px;
+            font-weight: 900;
+            text-shadow: 2px 2px 0 #FF8C00, 0 5px 10px rgba(0,0,0,0.5);
+            z-index: 10;
+            pointer-events: none;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="title">🚜 덤프트럭 흙 나르기</div>
+    
+    <div id="ui-container">
+        <div class="instruction">갈색 <b>흙 더미</b>를 터치해서 흙을 싣고,<br>원하는 곳으로 이동해 쏟아보세요!</div>
+        <button id="dump-btn" class="action-btn" disabled>짐칸 비었음</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let ground;
+        let dumpTruck;
+        let interactables = []; // 클릭 가능한 객체들 (바닥 + 흙더미)
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let targetMarker;
+        let particles = [];
+        let activePiles = []; // 흙 더미 그룹들을 추적하는 배열
+
+        const materials = {
+            paint: new THREE.MeshPhysicalMaterial({ color: 0xFFB300, metalness: 0.3, roughness: 0.2, clearcoat: 0.8 }),
+            darkGrey: new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.5, roughness: 0.7 }),
+            tire: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9, metalness: 0.1 }),
+            rim: new THREE.MeshStandardMaterial({ color: 0xDDDDDD, metalness: 0.9, roughness: 0.2 }),
+            glass: new THREE.MeshPhysicalMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.1, transparent: true, opacity: 0.6 }),
+            dirt: new THREE.MeshStandardMaterial({ color: 0x654321, roughness: 1.0, flatShading: true })
+        };
+
+        // 흙 더미가 누적된 횟수에 따라 크기(Scale)를 계산하는 함수
+        function getPileScale(loads) {
+            if (loads <= 0) return { x: 0.01, y: 0.01, z: 0.01 };
+            return {
+                x: 1 + (loads - 1) * 0.3,     // 넓이는 조금씩 증가
+                y: 1 + (loads - 1) * 0.6,     // 높이(y축)는 더 많이 가파르게 쌓임
+                z: 1 + (loads - 1) * 0.3
+            };
+        }
+
+        window.onload = function() {
+            init();
+            animate();
+        };
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(15, 15, 25);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
+            hemiLight.position.set(0, 20, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            dirLight.position.set(15, 30, -15);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 100;
+            dirLight.shadow.camera.left = -20;
+            dirLight.shadow.camera.right = 20;
+            dirLight.shadow.camera.top = 20;
+            dirLight.shadow.camera.bottom = -20;
+            scene.add(dirLight);
+
+            // 1. 모래밭 (바닥)
+            const groundGeo = new THREE.PlaneGeometry(150, 150);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0xDEB887, roughness: 1.0 });
+            ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            ground.userData.type = 'ground';
+            scene.add(ground);
+            interactables.push(ground);
+
+            // 2. 타겟 마커
+            const markerGeo = new THREE.RingGeometry(0.6, 1.0, 32);
+            const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+            targetMarker = new THREE.Mesh(markerGeo, markerMat);
+            targetMarker.rotation.x = -Math.PI / 2;
+            targetMarker.position.y = 0.05;
+            targetMarker.visible = false;
+            scene.add(targetMarker);
+
+            // 3. 트럭 생성
+            buildSmoothDumpTruck();
+
+            // 4. 흙 더미 (Load Points) 여러 개 배치
+            createDirtPile(-8, -8);
+            createDirtPile(12, 5);
+            createDirtPile(-5, 15);
+            createDirtPile(10, -12);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enablePan = false;
+            controls.maxPolarAngle = Math.PI / 2 - 0.05; 
+            controls.minDistance = 10;
+            controls.maxDistance = 50;
+
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+
+            document.getElementById('dump-btn').addEventListener('click', function(e) {
+                if (dumpTruck && dumpTruck.userData.state === 'idle' && dumpTruck.userData.isLoaded) {
+                    dumpTruck.userData.state = 'dumping';
+                    dumpTruck.userData.actionTimer = 0;
+                    dumpTruck.userData.hasCreatedPile = false; // 쏟을 때 흙 더미 생성 여부 초기화
+                }
+            });
+        }
+
+        // 흙 더미 생성 함수
+        function createDirtPile(x, z) {
+            const group = new THREE.Group();
+            group.position.set(x, 0, z);
+            group.userData.loads = 1; // 흙 더미의 누적 횟수 (처음 생성 시 1회)
+            
+            // 구를 여러 개 겹쳐서 자연스러운 흙 더미 형태 제작
+            for(let i=0; i<6; i++) {
+                const radius = Math.random() * 1.5 + 1.0;
+                const geo = new THREE.SphereGeometry(radius, 12, 10);
+                const mesh = new THREE.Mesh(geo, materials.dirt);
+                mesh.position.set(
+                    (Math.random() - 0.5) * 2.0,
+                    -radius * 0.4, // 반쯤 땅에 묻히게
+                    (Math.random() - 0.5) * 2.0
+                );
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.userData.type = 'dirtPile'; // 클릭 감지용 태그
+                mesh.userData.parentGroup = group; // 삭제를 위해 상위 그룹 기억
+                
+                group.add(mesh);
+                interactables.push(mesh); // 광선 충돌(Raycast) 배열에 추가
+            }
+            scene.add(group);
+            activePiles.push(group); // 생성된 흙 더미를 관리 배열에 추가
+        }
+
+        // 모서리가 둥근 큐브 생성 헬퍼
+        function createRoundedBoxExtrude(w, h, d, radius, material) {
+            const shape = new THREE.Shape();
+            const x = -w/2, y = -h/2;
+            shape.moveTo(x, y + radius);
+            shape.lineTo(x, y + h - radius);
+            shape.quadraticCurveTo(x, y + h, x + radius, y + h);
+            shape.lineTo(x + w - radius, y + h);
+            shape.quadraticCurveTo(x + w, y + h, x + w, y + h - radius);
+            shape.lineTo(x + w, y + radius);
+            shape.quadraticCurveTo(x + w, y, x + w - radius, y);
+            shape.lineTo(x + radius, y);
+            shape.quadraticCurveTo(x, y, x, y + radius);
+
+            const geo = new THREE.ExtrudeGeometry(shape, {
+                depth: d, bevelEnabled: true, bevelSegments: 3, steps: 2, bevelSize: 0.05, bevelThickness: 0.05
+            });
+            geo.center();
+            const mesh = new THREE.Mesh(geo, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        function buildSmoothDumpTruck() {
+            dumpTruck = new THREE.Group();
+
+            const chassis = createRoundedBoxExtrude(1.6, 0.4, 5.0, 0.1, materials.darkGrey);
+            chassis.position.y = 1.0;
+            dumpTruck.add(chassis);
+
+            const wheelPositions = [
+                [-0.9, 0.6, 1.8], [0.9, 0.6, 1.8],
+                [-0.9, 0.6, -1.2], [0.9, 0.6, -1.2],
+                [-0.9, 0.6, -2.2], [0.9, 0.6, -2.2]
+            ];
+            const wheels = [];
+            wheelPositions.forEach(pos => {
+                const wheelGroup = new THREE.Group();
+                wheelGroup.position.set(...pos);
+                const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.5, 24), materials.tire);
+                tire.rotation.z = Math.PI / 2;
+                tire.castShadow = true;
+                const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.52, 16), materials.rim);
+                rim.rotation.z = Math.PI / 2;
+                wheelGroup.add(tire);
+                wheelGroup.add(rim);
+                dumpTruck.add(wheelGroup);
+                wheels.push(wheelGroup);
+            });
+
+            const cabin = createRoundedBoxExtrude(2.0, 1.8, 1.6, 0.2, materials.paint);
+            cabin.position.set(0, 2.1, 1.6);
+            dumpTruck.add(cabin);
+            
+            const windowFront = createRoundedBoxExtrude(1.8, 0.8, 0.1, 0.1, materials.glass);
+            windowFront.position.set(0, 2.4, 2.42);
+            dumpTruck.add(windowFront);
+
+            const bedPivot = new THREE.Group();
+            bedPivot.position.set(0, 1.3, -2.5);
+            dumpTruck.add(bedPivot);
+
+            const bedBase = createRoundedBoxExtrude(2.4, 0.2, 4.0, 0.05, materials.paint);
+            bedBase.position.set(0, 0.1, 1.8);
+            bedPivot.add(bedBase);
+
+            const bedWallL = createRoundedBoxExtrude(0.2, 1.2, 4.0, 0.05, materials.paint);
+            bedWallL.position.set(-1.1, 0.8, 1.8);
+            bedPivot.add(bedWallL);
+
+            const bedWallR = createRoundedBoxExtrude(0.2, 1.2, 4.0, 0.05, materials.paint);
+            bedWallR.position.set(1.1, 0.8, 1.8);
+            bedPivot.add(bedWallR);
+
+            const bedWallF = createRoundedBoxExtrude(2.4, 1.2, 0.2, 0.05, materials.paint);
+            bedWallF.position.set(0, 0.8, 3.7);
+            bedPivot.add(bedWallF);
+            
+            const bedWallB = createRoundedBoxExtrude(2.4, 1.2, 0.1, 0.05, materials.paint);
+            bedWallB.position.set(0, 0.8, -0.15);
+            bedWallB.rotation.x = -0.1;
+            bedPivot.add(bedWallB);
+
+            // 짐칸 속 흙 더미 (초기에는 보이지 않음)
+            const dirtGroup = new THREE.Group();
+            for(let i=0; i<8; i++) {
+                const dirtM = new THREE.Mesh(new THREE.SphereGeometry(Math.random()*0.4 + 0.4, 8, 8), materials.dirt);
+                dirtM.position.set((Math.random() - 0.5) * 1.5, Math.random() * 0.3, (Math.random() - 0.5) * 3.0);
+                dirtGroup.add(dirtM);
+            }
+            dirtGroup.position.set(0, 0.5, 1.8);
+            dirtGroup.visible = false; // 기본값: 빈 차
+            bedPivot.add(dirtGroup);
+
+            dumpTruck.userData = {
+                target: new THREE.Vector3(0, 0, 0),
+                state: 'idle', 
+                targetAction: 'none', // 'load' 또는 'none'
+                isLoaded: false,      // 현재 흙이 실려있는가?
+                bedPivot: bedPivot,
+                wheels: wheels,
+                dirtGroup: dirtGroup,
+                actionTimer: 0,
+                targetPile: null,     // 현재 목표로 한 흙 더미
+                hasCreatedPile: false // 쏟기 액션 중 흙 더미 생성했는지 여부
+            };
+            scene.add(dumpTruck);
+            updateUIButton();
+        }
+
+        // 버튼 UI 상태 갱신 함수
+        function updateUIButton() {
+            const btn = document.getElementById('dump-btn');
+            if (dumpTruck.userData.isLoaded) {
+                btn.disabled = false;
+                btn.innerText = '흙 쏟기 🚛 (가득 참)';
+            } else {
+                btn.disabled = true;
+                btn.innerText = '짐칸 비었음 (더미 클릭)';
+            }
+        }
+
+        function onPointerDown(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactables);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                const point = hit.point;
+                targetMarker.position.set(point.x, 0.05, point.z);
+                targetMarker.visible = true;
+
+                dumpTruck.userData.target.copy(point);
+                dumpTruck.userData.bedPivot.rotation.x = 0; // 진행중이던 덤프 리셋
+                
+                // 클릭한 곳이 흙 더미인지 바닥인지 체크
+                if (hit.object.userData.type === 'dirtPile') {
+                    dumpTruck.userData.targetAction = 'load';
+                    dumpTruck.userData.targetPile = hit.object.userData.parentGroup; // 대상 흙더미 지정
+                } else {
+                    dumpTruck.userData.targetAction = 'none';
+                    dumpTruck.userData.targetPile = null;
+                }
+                
+                dumpTruck.userData.state = 'moving';
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 흙 쏟아짐(또는 위에서 떨어짐) 파티클 생성기
+        function spawnDirtParticles(pos, isLoading = false) {
+            for(let i=0; i< (isLoading ? 2 : 4); i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), materials.dirt);
+                p.position.copy(pos);
+                p.position.x += (Math.random() - 0.5) * 1.5;
+                p.position.y += Math.random() * 0.5;
+                p.position.z += (Math.random() - 0.5) * 1.0;
+                
+                if (isLoading) {
+                    // 위에서 아래로 툭툭 떨어지는 느낌
+                    p.userData = { velocity: new THREE.Vector3(0, -Math.random() * 0.1 - 0.1, 0), life: 0.5 };
+                } else {
+                    // 뒤로 확 쏟아지는 느낌
+                    p.userData = { velocity: new THREE.Vector3((Math.random() - 0.5) * 0.05, -Math.random() * 0.1 - 0.1, -Math.random() * 0.1), life: 1.0 };
+                }
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            controls.update();
+
+            // 파티클(흙 알갱이) 애니메이션
+            for(let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.userData.life -= delta * 0.8;
+                if(p.userData.life <= 0 || p.position.y < 0.1) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                } else {
+                    p.userData.velocity.y -= delta * 0.5;
+                    p.position.add(p.userData.velocity);
+                }
+            }
+
+            if (dumpTruck) {
+                const ud = dumpTruck.userData;
+                
+                if (ud.state === 'moving') {
+                    const dir = new THREE.Vector3().subVectors(ud.target, dumpTruck.position);
+                    dir.y = 0;
+                    const dist = dir.length();
+                    
+                    // 흙 더미를 향해 갈 때는 겹치지 않게 살짝 멀리서 정지
+                    const stopDist = ud.targetAction === 'load' ? 2.8 : 0.5;
+                    
+                    if (dist > stopDist) {
+                        const targetAngle = Math.atan2(dir.x, dir.z);
+                        const currentRotation = new THREE.Euler().copy(dumpTruck.rotation);
+                        let diff = targetAngle - currentRotation.y;
+                        
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        
+                        dumpTruck.rotation.y += diff * 6 * delta;
+
+                        const speed = 10 * delta;
+                        dir.normalize().multiplyScalar(speed);
+                        dumpTruck.position.add(dir);
+
+                        ud.wheels.forEach(wheel => { wheel.rotation.x += speed * 2; });
+                    } else {
+                        // 목표 지점 도착
+                        targetMarker.visible = false;
+                        
+                        if (ud.targetAction === 'load' && !ud.isLoaded) {
+                            // 흙 싣기 애니메이션 시작
+                            ud.state = 'loading';
+                            ud.actionTimer = 0;
+                        } else {
+                            ud.state = 'idle';
+                        }
+                    }
+                } 
+                else if (ud.state === 'loading') {
+                    ud.actionTimer += delta;
+                    
+                    // 트럭이 흙을 실으며 좌우로 살짝 들썩들썩 거림
+                    dumpTruck.rotation.z = Math.sin(ud.actionTimer * 25) * 0.03;
+                    
+                    // 흙을 실을 때 바닥의 흙 더미가 점진적으로 작아지는 애니메이션
+                    if (ud.targetPile) {
+                        const currentLoads = ud.targetPile.userData.loads;
+                        const startS = getPileScale(currentLoads);
+                        const endS = getPileScale(currentLoads - 1); // 한 번 펐을 때의 크기
+                        const progress = ud.actionTimer / 2.0;
+                        
+                        ud.targetPile.scale.set(
+                            startS.x - (startS.x - endS.x) * progress,
+                            startS.y - (startS.y - endS.y) * progress,
+                            startS.z - (startS.z - endS.z) * progress
+                        );
+                    }
+
+                    // 위에서 흙이 떨어지는 파티클 효과
+                    if(Math.random() < 0.2) {
+                        const loadPos = new THREE.Vector3(0, 3.5, 0).applyMatrix4(dumpTruck.matrixWorld);
+                        spawnDirtParticles(loadPos, true);
+                    }
+
+                    // 2초 뒤 흙 싣기 완료
+                    if (ud.actionTimer > 2.0) {
+                        ud.state = 'idle';
+                        dumpTruck.rotation.z = 0;
+                        ud.isLoaded = true;
+                        ud.dirtGroup.visible = true; // 짐칸에 흙 보임
+                        updateUIButton();
+                        
+                        if (ud.targetPile) {
+                            ud.targetPile.userData.loads -= 1; // 흙 더미 누적량 1 감소
+                            
+                            if (ud.targetPile.userData.loads <= 0) {
+                                // 누적량이 0이 되면 완전히 삭제
+                                scene.remove(ud.targetPile);
+                                interactables = interactables.filter(obj => !ud.targetPile.children.includes(obj));
+                                activePiles = activePiles.filter(p => p !== ud.targetPile);
+                            } else {
+                                // 아직 흙이 남았다면 크기를 목표치로 고정
+                                const finalS = getPileScale(ud.targetPile.userData.loads);
+                                ud.targetPile.scale.set(finalS.x, finalS.y, finalS.z);
+                            }
+                            ud.targetPile = null;
+                        }
+                    }
+                }
+                else if (ud.state === 'dumping') {
+                    ud.actionTimer += delta;
+                    
+                    if (ud.actionTimer < 2.0) {
+                        const progress = ud.actionTimer / 2.0;
+                        ud.bedPivot.rotation.x = -(Math.PI / 4) * (progress * progress * (3 - 2 * progress));
+
+                        if(progress > 0.4 && ud.isLoaded) {
+                            const dropPos = new THREE.Vector3(0, 0, -2).applyMatrix4(ud.bedPivot.matrixWorld);
+                            spawnDirtParticles(dropPos, false);
+                            ud.dirtGroup.visible = false; // 짐칸에서 흙 사라짐
+                        }
+                        
+                        // 짐칸이 거의 다 기울었을 때 흙 더미 쌓기 로직
+                        if (progress > 0.8 && ud.isLoaded && !ud.hasCreatedPile) {
+                            const pilePos = new THREE.Vector3(0, 0, -3.5).applyMatrix4(dumpTruck.matrixWorld);
+                            
+                            // 주변(반경 3.5)에 기존 흙 더미가 있는지 탐색
+                            let nearestPile = null;
+                            let minDist = 3.5;
+                            for(let pile of activePiles) {
+                                const dx = pile.position.x - pilePos.x;
+                                const dz = pile.position.z - pilePos.z;
+                                const dist = Math.sqrt(dx*dx + dz*dz);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    nearestPile = pile;
+                                }
+                            }
+
+                            if (nearestPile) {
+                                // 같은 장소에 기존 흙 더미가 있으면 그 위에 붓기 (Y축 위주로 크기 증가)
+                                nearestPile.userData.loads += 1;
+                                const newS = getPileScale(nearestPile.userData.loads);
+                                nearestPile.scale.set(newS.x, newS.y, newS.z);
+                            } else {
+                                // 아무것도 없다면 새 흙 더미 생성
+                                createDirtPile(pilePos.x, pilePos.z);
+                            }
+                            
+                            ud.hasCreatedPile = true;
+                        }
+                    } else if (ud.actionTimer < 3.5) {
+                        ud.isLoaded = false;
+                        updateUIButton();
+                        const progress = (ud.actionTimer - 2.0) / 1.5;
+                        ud.bedPivot.rotation.x = -(Math.PI / 4) * (1 - progress);
+                    } else {
+                        ud.state = 'idle';
+                        ud.bedPivot.rotation.x = 0;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
