@@ -8,7 +8,10 @@
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #87CEEB;
+            background-color: #8B7355; /* 공사장 흙먼지 느낌의 배경색 */
+            background-image: url('https://images.unsplash.com/photo-1503387762-592deb58ef4e?q=80&w=2000&auto=format&fit=crop'); /* 공사장 배경 이미지 */
+            background-size: cover;
+            background-position: center;
             font-family: 'Malgun Gothic', sans-serif;
             touch-action: none;
         }
@@ -125,10 +128,13 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
+            // 투명 배경 설정하여 CSS 배경 이미지가 보이도록 함
+            scene.background = null; 
+            // 흙먼지가 날리는 듯한 효과를 주기 위해 안개 색상을 모래색으로 변경
+            scene.fog = new THREE.Fog(0xDEB887, 30, 100);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // 투명도(alpha: true) 활성화
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
