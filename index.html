@@ -196,6 +196,7 @@
 
             window.addEventListener('resize', onWindowResize);
             renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            renderer.domElement.addEventListener('pointerup', onPointerUp);
 
             document.getElementById('dump-btn').addEventListener('click', function(e) {
                 if (dumpTruck && dumpTruck.userData.state === 'idle' && dumpTruck.userData.isLoaded) {
@@ -430,7 +431,20 @@
             }
         }
 
+        let pointerDownPos = new THREE.Vector2();
+
         function onPointerDown(event) {
+            pointerDownPos.set(event.clientX, event.clientY);
+        }
+
+        function onPointerUp(event) {
+            const dx = event.clientX - pointerDownPos.x;
+            const dy = event.clientY - pointerDownPos.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 드래그(화면 회전/이동)한 경우라면 트럭 이동 명령 무시
+            if (dist > 5) return;
+
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
